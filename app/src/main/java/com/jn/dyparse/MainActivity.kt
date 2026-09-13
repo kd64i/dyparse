@@ -42,15 +42,18 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.outlined.CleaningServices
+import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Feedback
 import androidx.compose.material.icons.outlined.Info
@@ -858,6 +861,8 @@ fun SettingsScreen(active: Boolean = true) {
     var showBatchGridDialog by rememberSaveable { mutableStateOf(false) }
     var showBatchParseSettingsDialog by rememberSaveable { mutableStateOf(false) }
     var showSaveSizeLimitDialog by rememberSaveable { mutableStateOf(false) }
+    var showServerConfigDialog by rememberSaveable { mutableStateOf(false) }
+    var serverConfigSummary by rememberSaveable { mutableStateOf(describeServerConfig()) }
     var videoSizeLimitMb by rememberSaveable {
         mutableStateOf(SaveSizePreferences.getLimitMb(appContext))
     }
@@ -1102,6 +1107,134 @@ fun SettingsScreen(active: Boolean = true) {
         )
     }
 
+    if (showServerConfigDialog) {
+        val defaultConfig = remember { ServerConfigStore.defaults() }
+        val savedConfig = remember { ServerConfigStore.getConfig() }
+        var apiBaseInput by rememberSaveable(showServerConfigDialog) { mutableStateOf(savedConfig.apiBase) }
+        var authorApiInput by rememberSaveable(showServerConfigDialog) { mutableStateOf(savedConfig.authorApiBase) }
+        var tokenInput by rememberSaveable(showServerConfigDialog) { mutableStateOf(savedConfig.token) }
+        var hmacInput by rememberSaveable(showServerConfigDialog) { mutableStateOf(savedConfig.hmacKey) }
+        var isTesting by remember { mutableStateOf(false) }
+        var testResult by remember { mutableStateOf("") }
+
+        MiuixAlertDialog(
+            onDismissRequest = { showServerConfigDialog = false },
+            title = { Text("服务器配置") },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        "本项目的解析逻辑全部在服务端，必须填入你自己部署的服务端信息。" +
+                            "部署方法见仓库 README 与 server/README.md。" +
+                            "三个值必须与服务端 config.php 完全一致。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    MiuixTextField(
+                        value = apiBaseInput,
+                        onValueChange = { apiBaseInput = it },
+                        label = { Text("解析接口地址") },
+                        supportingText = { Text("例如 https://你的域名/api/data.php") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    MiuixTextField(
+                        value = authorApiInput,
+                        onValueChange = { authorApiInput = it },
+                        label = { Text("作者列表接口地址") },
+                        supportingText = { Text("例如 https://你的域名/api/author_list.php") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    MiuixTextField(
+                        value = tokenInput,
+                        onValueChange = { tokenInput = it },
+                        label = { Text("API Token") },
+                        supportingText = { Text("对应服务端 config.php 的 API_TOKEN") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    MiuixTextField(
+                        value = hmacInput,
+                        onValueChange = { hmacInput = it },
+                        label = { Text("HMAC 密钥") },
+                        supportingText = { Text("对应服务端 config.php 的 API_HMAC_KEY") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (testResult.isNotBlank()) {
+                        Text(testResult, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {
+                MiuixPrimaryButton(
+                    onClick = {
+                        val apiBase = ServerConfigStore.normalizeUrl(apiBaseInput)
+                        val authorApi = ServerConfigStore.normalizeUrl(authorApiInput)
+                        if (apiBase == null || authorApi == null) {
+                            Toast.makeText(
+                                context,
+                                "两个地址都必须以 http:// 或 https:// 开头",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            return@MiuixPrimaryButton
+                        }
+                        ServerConfigStore.save(
+                            ServerConfigStore.Config(
+                                apiBase = apiBase,
+                                authorApiBase = authorApi,
+                                token = tokenInput.trim(),
+                                hmacKey = hmacInput.trim()
+                            )
+                        )
+                        serverConfigSummary = describeServerConfig()
+                        showServerConfigDialog = false
+                        Toast.makeText(context, "服务器配置已保存", Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    Text("保存")
+                }
+            },
+            dismissButton = {
+                Row {
+                    MiuixOutlinedButton(
+                        onClick = {
+                            if (isTesting) return@MiuixOutlinedButton
+                            isTesting = true
+                            testResult = "测试中…"
+                            scope.launch {
+                                testResult = ServerApiClient.testConnection(
+                                    apiBase = apiBaseInput,
+                                    token = tokenInput,
+                                    hmacKey = hmacInput
+                                )
+                                isTesting = false
+                            }
+                        }
+                    ) {
+                        Text(if (isTesting) "测试中…" else "测试连接")
+                    }
+                    TextButton(
+                        onClick = {
+                            apiBaseInput = defaultConfig.apiBase
+                            authorApiInput = defaultConfig.authorApiBase
+                            tokenInput = defaultConfig.token
+                            hmacInput = defaultConfig.hmacKey
+                            testResult = ""
+                        }
+                    ) {
+                        Text("恢复默认")
+                    }
+                    TextButton(onClick = { showServerConfigDialog = false }) {
+                        Text("取消")
+                    }
+                }
+            }
+        )
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -1146,6 +1279,14 @@ fun SettingsScreen(active: Boolean = true) {
                     icon = Icons.Outlined.Info,
                     title = "版本信息",
                     subtitle = getAppVersion(appContext)
+                )
+            }
+            item {
+                SettingsItem(
+                    icon = Icons.Outlined.Cloud,
+                    title = "服务器配置",
+                    subtitle = serverConfigSummary,
+                    onClick = { showServerConfigDialog = true }
                 )
             }
 
@@ -1247,6 +1388,20 @@ private fun SectionTitle(title: String, modifier: Modifier = Modifier) {
         modifier = modifier.padding(bottom = 8.dp),
         color = MaterialTheme.colorScheme.primary
     )
+}
+
+/**
+ * 设置页「服务器配置」的副标题：只显示主机名，避免把 Token 之类显示在列表上。
+ */
+private fun describeServerConfig(): String {
+    val config = ServerConfigStore.getConfig()
+    if (ServerConfigStore.isPlaceholder(config.apiBase)) {
+        return "未配置（必填）"
+    }
+    return runCatching { java.net.URI(config.apiBase).host }
+        .getOrNull()
+        ?.takeIf { it.isNotBlank() }
+        ?: config.apiBase
 }
 
 @Composable

@@ -21,16 +21,18 @@ import java.util.concurrent.TimeUnit
 object ServerApiClient {
     private const val TAG = "ServerApiClient"
 
-    // 构建时注入，见 app/build.gradle.kts 的 buildConfigField
-    private val API_BASE = BuildConfig.SERVER_API_BASE
-    private val TOKEN = BuildConfig.SERVER_API_TOKEN
-    private val HMAC_KEY = BuildConfig.SERVER_HMAC_KEY
-
     private val gson = Gson()
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
+
+    /** 当前生效的服务器地址与密钥：App 内配置优先，其次才是构建时注入的默认值 */
+    private fun config(): ServerConfigStore.Config = ServerConfigStore.getConfig()
+
+    /** 未配置服务端时的统一提示（分发的 APK 默认是占位地址） */
+    private const val NOT_CONFIGURED_HINT =
+        "未配置服务器：请到「设置 → 服务器配置」填写你自己的服务端地址与密钥（部署方法见 README）"
 
     /**
      * 解析单个作品（单条解析/批量/作者主页的作品解析/保存都走这里）。
@@ -47,22 +49,26 @@ object ServerApiClient {
         highest: Boolean = false,
         batchId: String? = null
     ): ParseResult = withContext(Dispatchers.IO) {
+        val cfg = config()
+        if (ServerConfigStore.isPlaceholder(cfg.apiBase)) {
+            return@withContext ParseResult.Error(NOT_CONFIGURED_HINT)
+        }
         try {
             // 直接拼接查询串，避免 HttpUrl 解析 base 复杂化
             val encodedInput = java.net.URLEncoder.encode(input, "UTF-8")
             val modeParam = if (useCookie) "&mode=cookie" else ""
             val originalParam = if (original) "&original=1" else ""
             val highestParam = if (highest) "&highest=1" else ""
-            val fullUrl = API_BASE + "?url=" + encodedInput + modeParam + originalParam + highestParam
+            val fullUrl = cfg.apiBase + "?url=" + encodedInput + modeParam + originalParam + highestParam
 
             val timeMs = System.currentTimeMillis().toString()
             // 签名串 = token + time + 原始编码url + mode + original + highest后缀（与服务器一致）
-            val signPayload = TOKEN + timeMs + encodedInput + modeParam + originalParam + highestParam
-            val sign = hmacSha256(signPayload, HMAC_KEY)
+            val signPayload = cfg.token + timeMs + encodedInput + modeParam + originalParam + highestParam
+            val sign = hmacSha256(signPayload, cfg.hmacKey)
 
             val request = Request.Builder()
                 .url(fullUrl)
-                .header("X-Token", TOKEN)
+                .header("X-Token", cfg.token)
                 .header("X-Time", timeMs)
                 .header("X-Sign", sign)
                 .build()
@@ -163,6 +169,85 @@ object ServerApiClient {
         mac.init(javax.crypto.spec.SecretKeySpec(key.toByteArray(), "HmacSHA256"))
         return mac.doFinal(data.toByteArray()).joinToString("") { "%02x".format(it) }
     }
+
+    /**
+     * 测试服务器配置是否可用（供「设置 → 服务器配置」使用）。
+     *
+     * 做两件事：
+     *  1. 访问 `data.php?diag=1`（服务端不鉴权）——确认地址可达、确实是本项目的服务端，
+     *     并顺带告诉使用者服务端有没有配好抖音 Cookie；
+     *  2. 带签名请求一次空 `url=` —— 服务端是「先鉴权、再校验参数」，
+     *     所以返回 unauthorized / bad signature 就说明 token 或 HMAC 密钥不匹配。
+     */
+    suspend fun testConnection(
+        apiBase: String,
+        token: String,
+        hmacKey: String
+    ): String = withContext(Dispatchers.IO) {
+        val normalized = ServerConfigStore.normalizeUrl(apiBase)
+            ?: return@withContext "❌ 地址格式不对：必须以 http:// 或 https:// 开头"
+
+        val diagReport = try {
+            val diagUrl = if (normalized.contains("?")) "$normalized&diag=1" else "$normalized?diag=1"
+            client.newCall(Request.Builder().url(diagUrl).get().build()).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) {
+                    return@withContext "❌ 连接失败：HTTP ${resp.code}\n请确认地址正确，且服务端已按 server/README.md 部署"
+                }
+                val root = runCatching {
+                    com.google.gson.JsonParser.parseString(body).asJsonObject
+                }.getOrNull()
+                    ?: return@withContext "⚠️ 能连上，但响应不是 JSON —— 这个地址不是本项目的 data.php"
+                val version = root.strOrNull("version")
+                    ?: return@withContext "⚠️ 能连上，但响应缺少 version 字段，可能不是本项目的 data.php"
+                val hasCookie = root.strOrNull("douyin_cookie_has_sessionid") == "yes"
+                buildString {
+                    append("✅ 服务端可达（").append(version).append("）")
+                    append("\n抖音 Cookie：")
+                    append(if (hasCookie) "已配置" else "未配置（批量解析 / 原画质 / 最高画质会受限）")
+                }
+            }
+        } catch (e: Exception) {
+            return@withContext "❌ 连接失败：${e.javaClass.simpleName}: ${e.message}"
+        }
+
+        val authReport = try {
+            val timeMs = System.currentTimeMillis().toString()
+            val sign = hmacSha256(token + timeMs, hmacKey)
+            val probeUrl = if (normalized.contains("?")) "$normalized&url=" else "$normalized?url="
+            client.newCall(
+                Request.Builder()
+                    .url(probeUrl)
+                    .header("X-Token", token)
+                    .header("X-Time", timeMs)
+                    .header("X-Sign", sign)
+                    .get()
+                    .build()
+            ).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                val err = runCatching {
+                    com.google.gson.JsonParser.parseString(body).asJsonObject.strOrNull("error")
+                }.getOrNull().orEmpty()
+                when {
+                    err.contains("unauthorized") ->
+                        "❌ 鉴权失败：API Token 与服务端 config.php 里的 API_TOKEN 不一致"
+                    err.contains("bad signature") ->
+                        "❌ 鉴权失败：HMAC 密钥与服务端 config.php 里的 API_HMAC_KEY 不一致"
+                    err.contains("expired") ->
+                        "❌ 鉴权失败：服务器与手机时间相差超过 5 分钟，请先校准时间"
+                    else ->
+                        "✅ 鉴权通过（Token 与 HMAC 密钥都正确）"
+                }
+            }
+        } catch (e: Exception) {
+            "⚠️ 鉴权检测未完成：${e.javaClass.simpleName}: ${e.message}"
+        }
+
+        "$diagReport\n$authReport"
+    }
+
+    private fun com.google.gson.JsonObject.strOrNull(key: String): String? =
+        runCatching { get(key)?.takeIf { !it.isJsonNull }?.asString }.getOrNull()
 
     // ========== 响应模型 ==========
 

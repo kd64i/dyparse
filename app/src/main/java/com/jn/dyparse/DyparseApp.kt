@@ -13,6 +13,8 @@ class DyparseApp : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        // 服务器配置要先于任何网络调用初始化（解析全程依赖它）
+        ServerConfigStore.init(this)
     }
 
     override fun newImageLoader(): ImageLoader {

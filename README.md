@@ -15,9 +15,11 @@
 
 - [功能特性](#功能特性)
 - [架构概览](#架构概览)
+- [给使用者：安装与配置](#给使用者安装与配置)
 - [快速开始](#快速开始)
 - [配置说明](#配置说明)
 - [服务端部署](#服务端部署)
+- [发布正式包](#发布正式包)
 - [项目结构](#项目结构)
 - [测试](#测试)
 - [安全与合规](#安全与合规)
@@ -62,7 +64,44 @@
         抖音开放接口 / 分享页
 ```
 
-解析逻辑以**服务端为主**：服务端持有登录 Cookie，成功率与画质都更高；客户端在服务端不可用时保留本地匿名解析兜底能力。
+解析逻辑**全部在服务端**：App 只负责调用自己的 PHP API，不在本地直连抖音。服务端持有登录 Cookie，负责 a_bogus 签名、原画质/最高画质地址解析。
+
+> ⚠️ **服务端是必需组件，不是可选项。**
+> 单条解析、保存、画质切换都直接依赖服务端接口，**没有服务端 App 无法工作**。
+> 仅「作者主页作品列表」在服务端不可用时会回落到本地 WebView 链路，但结果不完整。
+> 也就是说：**想用这个 App，你必须先按 [`server/README.md`](server/README.md) 部署自己的服务端。**
+
+## 给使用者：安装与配置
+
+> 只想用这个 App、不想写代码的话，看这一节就够了。
+
+**前提：你需要有自己的服务端。** 本项目的解析逻辑全部在服务端（原因见[架构概览](#架构概览)），而服务端要配置一个真人抖音账号的 Cookie —— 作者**不会也无法**把自己的服务端开放给你用。
+
+### 步骤
+
+1. **拿到 APK**，三选一：
+   - 到 [Releases](https://github.com/kd64i/dyparse/releases) 下载 `app-release.apk`；
+   - 从 Actions 拿 debug 包：最近一次成功的 **Build** → 页面底部 **Artifacts** → `app-debug`（需登录 GitHub）；
+   - 自己构建，见[快速开始](#快速开始)。
+2. **部署服务端**：按 [`server/README.md`](server/README.md) 把 `data.php`、`author_list.php`、`abogus.php`、`config.php` 上传到你的虚拟主机。
+3. **在 App 里配置**：打开 App → **设置 → 服务器配置** → 填入解析接口地址、作者列表接口地址、API Token、HMAC 密钥 → 点 **测试连接** → 通过后点 **保存**。
+
+「测试连接」会做两件事：
+
+- 访问 `data.php?diag=1`（服务端不鉴权）→ 确认地址可达、确实是本项目的服务端，并告诉你服务端**有没有配好抖音 Cookie**；
+- 带签名探测一次 → 告诉你 **Token 与 HMAC 密钥是否正确**。
+
+### 常见提示对照
+
+| App 提示 | 原因 |
+| --- | --- |
+| 未配置服务器 | 还没在 App 里填地址，或填的仍是默认占位地址 `your-server.example.com` |
+| 鉴权失败：API Token 与服务端不一致 | App 里填的 Token ≠ `server/config.php` 的 `API_TOKEN` |
+| 鉴权失败：HMAC 密钥与服务端不一致 | 同上，对应 `API_HMAC_KEY` |
+| 鉴权失败：服务器与手机时间相差超过 5 分钟 | 服务端校验了时间戳防重放，校准服务器或手机时间 |
+| 抖音 Cookie：未配置 | 服务端 `DOUYIN_COOKIE` 为空。单条解析可用，但批量解析 / 原画质 / 最高画质会受限 |
+
+> 在 App 内填写的值保存在本机 SharedPreferences，**优先于**构建时注入的默认值。想改回默认值，在对话框里点「恢复默认」。
 
 ## 快速开始
 
@@ -84,7 +123,7 @@ cd dyparse
 
 # 1) 配置本地参数（首次必须，否则只有占位服务器地址）
 cp local.properties.example local.properties
-# 编辑 local.properties：填写 sdk.dir，以及可选的签名 / 服务器配置
+# 编辑 local.properties：填写 sdk.dir，以及服务器地址/密钥（不打正式包的话签名可留空）
 
 # 2) 构建 Debug 包
 ./gradlew assembleDebug
@@ -115,7 +154,7 @@ Gradle 属性  >  local.properties  >  环境变量  >  源码中的占位默认
 
 未配置时 `assembleRelease` 会因签名缺失而失败，`assembleDebug` 不受影响。
 
-### 服务器解析 API（可选）
+### 服务器解析 API（**必需**）
 
 | 键 | 对应服务端常量 |
 | --- | --- |
@@ -124,7 +163,12 @@ Gradle 属性  >  local.properties  >  环境变量  >  源码中的占位默认
 | `SERVER_API_TOKEN` | `API_TOKEN` |
 | `SERVER_HMAC_KEY` | `API_HMAC_KEY` |
 
-这些值会被写入 `BuildConfig`（`app/build.gradle.kts` 中的 `buildConfigField`），由 `ServerApiClient` / `ServerAuthorClient` 读取。**不要把真实 token 写进源码或提交到仓库**；CI 中请使用 GitHub Actions Secrets。
+这些值会被写入 `BuildConfig`（`app/build.gradle.kts` 中的 `buildConfigField`），由 `ServerApiClient` / `ServerAuthorClient` 读取。
+
+注意两点：
+
+- 它们只是**构建时的默认值**。使用者可以在 App 里「设置 → 服务器配置」覆盖（存本机 SharedPreferences，优先级更高），所以**分发的 APK 可以只带占位地址**，不必泄露你的服务器。
+- **不要把真实 token 写进源码或提交到仓库**；CI 中请使用 GitHub Actions Secrets。
 
 ### 依赖仓库来源（可选）
 
@@ -148,6 +192,60 @@ systemProp.dyparse.cnMirrors=true
 
 > 你抖音账号的完整 Cookie 等同于账号凭据。一旦泄露，攻击者可直接接管账号。若曾误提交，请立即在抖音退出登录以作废会话。
 
+## 发布正式包
+
+### 本地打包
+
+在 `local.properties` 里配置签名（这些键**不能**提交，密钥库也**必须**放在项目目录之外）：
+
+```properties
+RELEASE_STORE_FILE=D:/path/to/your-release.jks
+RELEASE_STORE_PASSWORD=你的库口令
+RELEASE_KEY_ALIAS=你的别名
+RELEASE_KEY_PASSWORD=你的密钥口令
+```
+
+```bash
+./gradlew assembleRelease
+# 产物：app/build/outputs/apk/release/app-release.apk
+```
+
+未配置签名时 `assembleRelease` 会失败，`assembleDebug` 不受影响。
+
+### 打 tag 自动发布（推荐）
+
+推送 `v*` 形式的 tag 会触发 [`.github/workflows/release.yml`](.github/workflows/release.yml)：跑测试 → 用 Secrets 里的密钥库签名打包 → 校验签名 → 自动创建 GitHub Release 并附上 APK。
+
+```bash
+# tag 建议与 app/build.gradle.kts 的 versionName 一致（当前 4.2 → v4.2）
+git tag v4.2 && git push origin v4.2
+```
+
+**一次性配置**：仓库 → Settings → Secrets and variables → Actions → New repository secret，添加 4 个：
+
+| Secret | 内容 |
+| --- | --- |
+| `RELEASE_KEYSTORE_BASE64` | 密钥库文件的 Base64 |
+| `RELEASE_STORE_PASSWORD` | 密钥库口令 |
+| `RELEASE_KEY_ALIAS` | 密钥别名 |
+| `RELEASE_KEY_PASSWORD` | 密钥口令 |
+
+生成 Base64（Windows PowerShell）：
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("D:\path\to\your-release.jks")) | Set-Clipboard
+```
+
+macOS / Linux：
+
+```bash
+base64 -w0 your-release.jks
+```
+
+> ⚠️ **密钥库和口令一旦泄露，任何人都能冒名发布你的 App 更新。** 请只放在 GitHub Secrets 和你的本机，不要放进仓库、不要贴进 Issue。
+>
+> ⚠️ 发布前请确认你已阅读 [DISCLAIMER.md](DISCLAIMER.md)：分发二进制比只提供源码承担更高的法律风险，请自行评估。
+
 ## 项目结构
 
 ```
@@ -160,8 +258,9 @@ systemProp.dyparse.cnMirrors=true
 │       │   ├── java/com/jn/dyparse/
 │       │   │   ├── MainActivity.kt            # 入口 Activity
 │       │   │   ├── ParserViewModel.kt         # 核心状态机
-│       │   │   ├── ServerApiClient.kt         # 服务端单条解析
+│       │   │   ├── ServerApiClient.kt         # 服务端单条解析 + 连接测试
 │       │   │   ├── ServerAuthorClient.kt      # 服务端作者列表
+│       │   │   ├── ServerConfigStore.kt       # 服务器配置（App 内可改，优先于 BuildConfig）
 │       │   │   ├── AuthorBatchManager.kt      # 批量解析调度
 │       │   │   ├── DouyinABogusSigner.kt      # X-Bogus 签名
 │       │   │   ├── DouyinAuthStore.kt         # Cookie 登录态管理
@@ -170,6 +269,9 @@ systemProp.dyparse.cnMirrors=true
 │       │   │   └── ui/                        # Compose 页面与组件
 │       │   └── res/
 │       └── test/                      # 单元测试
+├── .github/workflows/
+│   ├── build.yml                      # push/PR 时跑测试并产出 debug APK
+│   └── release.yml                    # 打 v* tag 时签名打包并发 Release
 ├── server/                            # PHP 解析 API（含部署文档）
 ├── gradle/libs.versions.toml          # 版本目录
 ├── local.properties.example           # 本地配置模板
@@ -184,7 +286,7 @@ systemProp.dyparse.cnMirrors=true
 ./gradlew connectedAndroidTest   # 需要连接设备 / 模拟器
 ```
 
-现有单元测试覆盖：解析结果字段映射、图集媒体解析、下载地址解析、作者批量匹配、风控校验识别。
+现有单元测试覆盖：解析结果字段映射、图集媒体解析、下载地址解析、作者批量匹配、风控校验识别、服务器地址规范化。
 
 ## 安全与合规
 

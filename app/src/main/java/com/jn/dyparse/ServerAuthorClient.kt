@@ -15,10 +15,8 @@ import java.util.concurrent.TimeUnit
  * 解决客户端匿名只能看到部分作品的问题。
  */
 object ServerAuthorClient {
-    // 与 ServerApiClient 一致，构建时从 BuildConfig 注入
-    private val API_BASE = BuildConfig.SERVER_AUTHOR_API_BASE
-    private val TOKEN = BuildConfig.SERVER_API_TOKEN
-    private val HMAC_KEY = BuildConfig.SERVER_HMAC_KEY
+    // 与 ServerApiClient 一致：App 内配置优先，其次才是构建时注入的默认值
+    private fun config(): ServerConfigStore.Config = ServerConfigStore.getConfig()
 
     private val gson = Gson()
     private val client = OkHttpClient.Builder()
@@ -74,18 +72,23 @@ object ServerAuthorClient {
         maxCursor: Long = 0L,
         count: Int = 18
     ): AuthorListPage = withContext(Dispatchers.IO) {
+        val cfg = config()
+        // 未配置服务端时抛异常，让 AuthorBatchManager 回落到本地 WebView 链路
+        if (ServerConfigStore.isPlaceholder(cfg.authorApiBase)) {
+            throw IOException("未配置服务器：请到「设置 → 服务器配置」填写你自己的服务端地址")
+        }
         val encodedInput = URLEncoder.encode(input, "UTF-8")
         val cursorSuffix = if (maxCursor > 0) "&max_cursor=$maxCursor" else ""
         val countSuffix = if (count != 18) "&count=$count" else ""
-        val fullUrl = API_BASE + "?url=" + encodedInput + cursorSuffix + countSuffix
+        val fullUrl = cfg.authorApiBase + "?url=" + encodedInput + cursorSuffix + countSuffix
 
         val timeMs = System.currentTimeMillis().toString()
-        val signPayload = TOKEN + timeMs + encodedInput + cursorSuffix + countSuffix
-        val sign = ServerApiClient.hmacSha256(signPayload, HMAC_KEY)
+        val signPayload = cfg.token + timeMs + encodedInput + cursorSuffix + countSuffix
+        val sign = ServerApiClient.hmacSha256(signPayload, cfg.hmacKey)
 
         val request = Request.Builder()
             .url(fullUrl)
-            .header("X-Token", TOKEN)
+            .header("X-Token", cfg.token)
             .header("X-Time", timeMs)
             .header("X-Sign", sign)
             .build()
