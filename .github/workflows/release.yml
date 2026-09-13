@@ -108,25 +108,36 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           APK=app/build/outputs/apk/release/app-release.apk
-          cat > "$RUNNER_TEMP/notes.md" <<'EOF'
-          > ⚠️ **仅供学习与研究使用。** 请先阅读仓库中的 [DISCLAIMER.md](../blob/main/DISCLAIMER.md)。
-          > 请勿用于商业用途或侵犯他人著作权、平台服务条款的行为。
+          NOTES="$RUNNER_TEMP/notes.md"
+          DISCLAIMER_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/main/DISCLAIMER.md"
+          SERVER_DOC_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/main/server/README.md"
+          # 用 echo 逐行写，避免 heredoc 在 YAML 里的缩进被当成 Markdown 代码块
+          {
+            echo "> ⚠️ **仅供学习与研究使用。** 使用前请先阅读 [DISCLAIMER.md](${DISCLAIMER_URL})。"
+            echo "> 请勿用于商业用途，或用于侵犯他人著作权、违反平台服务条款的行为。"
+            echo ""
+            echo "## ⚠️ 使用前必读"
+            echo ""
+            echo "本 App 的解析逻辑**全部在服务端**，安装后必须先配置你自己的服务端才能使用："
+            echo ""
+            echo "1. 按 [server/README.md](${SERVER_DOC_URL}) 在你自己的虚拟主机上部署 PHP 服务端；"
+            echo "2. 打开 App → **设置 → 服务器配置**，填入你的服务端地址、API Token、HMAC 密钥；"
+            echo "3. 点「测试连接」确认通过后即可使用。"
+            echo ""
+            echo "未配置服务端时，解析会提示「未配置服务器」。"
+            echo ""
+            echo "## 安装"
+            echo ""
+            echo '下载下方 `app-release.apk` 安装。仅支持 `arm64-v8a`，需要 Android 7.0（API 24）及以上。'
+          } > "$NOTES"
 
-          ## 使用前必读
-
-          本 App 的解析逻辑**全部在服务端**，安装后必须先配置你自己的服务端才能使用：
-
-          1. 按 [`server/README.md`](../blob/main/server/README.md) 在你自己的虚拟主机上部署 PHP 服务端；
-          2. 打开 App → **设置 → 服务器配置**，填入你的服务端地址、API Token、HMAC 密钥；
-          3. 点「测试连接」确认通过后即可使用。
-
-          未配置服务端时，解析会提示「未配置服务器」。
-
-          ## 安装
-
-          下载下方 `app-release.apk` 安装。仅支持 `arm64-v8a`，需要 Android 7.0（API 24）及以上。
-          EOF
-          gh release create "${GITHUB_REF_NAME}" "$APK" \
-            --title "${GITHUB_REF_NAME}" \
-            --notes-file "$RUNNER_TEMP/notes.md" \
-            --verify-tag
+          # 幂等：重跑工作流时 Release 可能已存在，此时改为覆盖 APK
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} 已存在，改为覆盖其中的 APK"
+            gh release upload "${GITHUB_REF_NAME}" "$APK" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" "$APK" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes-file "$NOTES" \
+              --verify-tag
+          fi

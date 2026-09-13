@@ -212,6 +212,13 @@ RELEASE_KEY_PASSWORD=你的密钥口令
 
 未配置签名时 `assembleRelease` 会失败，`assembleDebug` 不受影响。
 
+> ⚠️ **本地构建出的 APK 不要公开分发。**
+> 如果你在 `local.properties` 里填了真实的 `SERVER_API_BASE` / `SERVER_API_TOKEN` / `SERVER_HMAC_KEY`，
+> 这些值会被编译进 `BuildConfig`，任何人拿到 APK 都能从 `classes.dex` 里直接读出来
+> （实测：`unzip` 后 `strings classes.dex | findstr 636366` 就能看到服务器域名）。
+> 本地包只适合自己用；**对外分发请使用 CI 构建的产物**（CI 里没有这些 Secret，包内只有占位地址，
+> 使用者需要自己在「设置 → 服务器配置」里填）。
+
 ### 打 tag 自动发布（推荐）
 
 推送 `v*` 形式的 tag 会触发 [`.github/workflows/release.yml`](.github/workflows/release.yml)：跑测试 → 用 Secrets 里的密钥库签名打包 → 校验签名 → 自动创建 GitHub Release 并附上 APK。
