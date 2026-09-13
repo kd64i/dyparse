@@ -126,6 +126,18 @@ Gradle 属性  >  local.properties  >  环境变量  >  源码中的占位默认
 
 这些值会被写入 `BuildConfig`（`app/build.gradle.kts` 中的 `buildConfigField`），由 `ServerApiClient` / `ServerAuthorClient` 读取。**不要把真实 token 写进源码或提交到仓库**；CI 中请使用 GitHub Actions Secrets。
 
+### 依赖仓库来源（可选）
+
+默认使用**官方源**（`google()` / `mavenCentral()` / `gradlePluginPortal()`），阿里云镜像仅作兜底，以保证 GitHub Actions 与海外用户解析稳定。
+
+如果你在国内、访问 `dl.google.com` 困难，可以切回「阿里云优先」。在你**自己机器**的 `~/.gradle/gradle.properties` 里加一行即可（**不要**写进本仓库的 `gradle.properties`，否则 CI 也会跟着走镜像）：
+
+```properties
+systemProp.dyparse.cnMirrors=true
+```
+
+或构建时设置环境变量 `DY_PARSE_CN_MIRRORS=true`。
+
 ## 服务端部署
 
 见 [`server/README.md`](server/README.md)。要点：

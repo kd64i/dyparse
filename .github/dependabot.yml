@@ -1,20 +1,51 @@
-# 依赖更新与漏洞提醒由 Dependabot 自动发起 PR
+# 依赖更新由 Dependabot 自动发起 PR。
+#
+# ⚠️ 重要：本项目固定在一条已验证的工具链上（AGP 9.0.1 / Kotlin 2.0.21 /
+#    KSP 2.0.21-1.0.28 / Gradle 9.2.1）。Kotlin、KSP、AGP、Gradle 之间必须
+#    版本对齐，**跨越主版本的自动升级 PR 必然构建失败**，只会制造红色的噪音。
+#    因此这里忽略所有主版本升级，只接受次版本/补丁版本，并把它们合并成单个 PR。
+#
+#    要升级工具链时，请手动改 gradle/libs.versions.toml 与
+#    gradle/wrapper/gradle-wrapper.properties，并本地验证通过后再提交。
 version: 2
 updates:
-  # Gradle 依赖（gradle/libs.versions.toml + build.gradle.kts）
+  # Gradle 依赖（gradle/libs.versions.toml、build.gradle.kts、wrapper）
   - package-ecosystem: gradle
     directory: "/"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     labels:
       - dependencies
+    ignore:
+      # 主版本升级一律不自动开 PR（Kotlin/KSP/AGP/Gradle 必须成套对齐）
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
+    groups:
+      # 次版本 + 补丁版本合并成一个 PR，避免刷屏
+      gradle-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
 
   # GitHub Actions 版本
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: monthly
+    open-pull-requests-limit: 2
     labels:
       - dependencies
       - ci
+    ignore:
+      # Actions 的大版本升级（如 checkout v4 → v7）同样是破坏性的，不自动开 PR
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
+    groups:
+      github-actions:
+        patterns:
+          - "*"
