@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+   Android 11 及以下的备份规则（API 31+ 由 data_extraction_rules.xml 接管）。
+   详见 https://developer.android.com/guide/topics/data/autobackup
+
+   安全说明：App 会把抖音登录 Cookie 保存在 SharedPreferences 里，
+   若参与系统云备份，等同于把账号凭据上传到云端。这里显式排除这些文件。
+-->
+<full-backup-content>
+    <!-- 抖音登录 Cookie 与画质偏好 -->
+    <exclude domain="sharedpref" path="dyparse_auth.xml" />
+    <!-- 匿名会话 Cookie -->
+    <exclude domain="sharedpref" path="dyparse_anon_session.xml" />
+</full-backup-content>

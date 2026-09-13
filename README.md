@@ -1,0 +1,198 @@
+# dyparse
+
+> 抖音（Douyin）作品解析与下载工具 —— Android 客户端（Kotlin / Jetpack Compose）+ PHP 服务端。
+
+[![Build](https://github.com/kd64i/dyparse/actions/workflows/build.yml/badge.svg)](https://github.com/kd64i/dyparse/actions/workflows/build.yml)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
+> [!WARNING]
+> **本项目仅供学习 Android 开发、网络协议分析与爬虫技术研究使用。**
+> 请勿用于任何商业用途或侵犯他人著作权、平台服务条款的行为。使用前请务必阅读 [DISCLAIMER.md](DISCLAIMER.md)。
+
+---
+
+## 目录
+
+- [功能特性](#功能特性)
+- [架构概览](#架构概览)
+- [快速开始](#快速开始)
+- [配置说明](#配置说明)
+- [服务端部署](#服务端部署)
+- [项目结构](#项目结构)
+- [测试](#测试)
+- [安全与合规](#安全与合规)
+- [第三方组件](#第三方组件)
+- [许可证](#许可证)
+
+---
+
+## 功能特性
+
+| 功能 | 说明 |
+| --- | --- |
+| 单条解析 | 粘贴分享口令 / 分享链接 / 作品 ID，解析视频或图集 |
+| 批量解析 | 一次提交多条链接，并发解析并汇总结果 |
+| 作者主页抓取 | 通过服务端携带登录态拉取作者完整作品列表（突破客户端匿名可见条数限制） |
+| 画质选择 | 支持「原画质」与「最高画质」（按 `bit_rate` 最高档选择）保存 |
+| 实况照片 | 识别并预览 / 保存实况图（Live Photo）的视频轨与图片轨 |
+| 解析历史 | 基于 Room 本地持久化，支持查看与重新保存 |
+| 液态玻璃 UI | 基于 [Backdrop](https://github.com/Kyant0/Backdrop) 的毛玻璃 / 液态动效界面 |
+| 请求签名 | 客户端实现 `X-Bogus`，服务端实现 `a_bogus`，用于通过平台的请求校验 |
+| 安全加固 | 原生层（C++）反调试 / 反注入 / 环境检测，见 `SecurityGuard.kt` |
+
+## 架构概览
+
+```
+┌──────────────────────────────┐
+│  Android App (Kotlin/Compose)│
+│  · UI: MainActivity + ui/    │
+│  · 状态: ParserViewModel     │
+│  · 存储: Room (HistoryDatabase)
+└───────────┬──────────────────┘
+            │  HTTPS + X-Token / X-Time / X-Sign (HMAC-SHA256)
+            ▼
+┌──────────────────────────────┐
+│  PHP API (server/)           │
+│  · data.php      单条解析     │
+│  · author_list.php 作者列表   │
+│  · abogus.php    a_bogus 签名 │
+└───────────┬──────────────────┘
+            │  携带登录 Cookie
+            ▼
+        抖音开放接口 / 分享页
+```
+
+解析逻辑以**服务端为主**：服务端持有登录 Cookie，成功率与画质都更高；客户端在服务端不可用时保留本地匿名解析兜底能力。
+
+## 快速开始
+
+### 环境要求
+
+| 项目 | 版本 |
+| --- | --- |
+| JDK | 17 或更高（`gradle/gradle-daemon-jvm.properties` 固定为 21，缺失时 Gradle 会自动下载） |
+| Android SDK | compileSdk 36（Android 16） |
+| Android NDK | 需与 CMake 3.22.1 配套（用于 `app/src/main/cpp`） |
+| Gradle | 使用仓库自带 wrapper，无需单独安装 |
+| 最低运行版本 | Android 7.0（API 24），仅构建 `arm64-v8a` |
+
+### 构建
+
+```bash
+git clone https://github.com/kd64i/dyparse.git
+cd dyparse
+
+# 1) 配置本地参数（首次必须，否则只有占位服务器地址）
+cp local.properties.example local.properties
+# 编辑 local.properties：填写 sdk.dir，以及可选的签名 / 服务器配置
+
+# 2) 构建 Debug 包
+./gradlew assembleDebug
+# 产物：app/build/outputs/apk/debug/app-debug.apk
+
+# 3) 运行单元测试
+./gradlew test
+```
+
+在 Android Studio 中直接 `Open` 项目根目录即可，IDE 会自动生成 `local.properties` 中的 `sdk.dir`。
+
+## 配置说明
+
+所有敏感与易变配置都通过 **`local.properties`（已被 `.gitignore` 忽略）**、Gradle 属性或环境变量注入，源码中只保留占位值。查找优先级为：
+
+```
+Gradle 属性  >  local.properties  >  环境变量  >  源码中的占位默认值
+```
+
+### Release 签名（可选）
+
+| 键 | 说明 |
+| --- | --- |
+| `RELEASE_STORE_FILE` | 密钥库路径，建议放在项目目录之外 |
+| `RELEASE_STORE_PASSWORD` | 密钥库口令 |
+| `RELEASE_KEY_ALIAS` | 密钥别名 |
+| `RELEASE_KEY_PASSWORD` | 密钥口令 |
+
+未配置时 `assembleRelease` 会因签名缺失而失败，`assembleDebug` 不受影响。
+
+### 服务器解析 API（可选）
+
+| 键 | 对应服务端常量 |
+| --- | --- |
+| `SERVER_API_BASE` | `data.php` 的完整地址 |
+| `SERVER_AUTHOR_API_BASE` | `author_list.php` 的完整地址 |
+| `SERVER_API_TOKEN` | `API_TOKEN` |
+| `SERVER_HMAC_KEY` | `API_HMAC_KEY` |
+
+这些值会被写入 `BuildConfig`（`app/build.gradle.kts` 中的 `buildConfigField`），由 `ServerApiClient` / `ServerAuthorClient` 读取。**不要把真实 token 写进源码或提交到仓库**；CI 中请使用 GitHub Actions Secrets。
+
+## 服务端部署
+
+见 [`server/README.md`](server/README.md)。要点：
+
+1. 上传 `data.php`、`author_list.php`、`abogus.php` 与你的 `config.php` 到同一目录；
+2. `config.php` 由 `server/config.example.php` 复制而来，填入强随机 `API_TOKEN`、`API_HMAC_KEY` 和你自己的抖音 Cookie；
+3. `config.php` 已被 `.gitignore` 忽略，**永远不要提交**。
+
+> 你抖音账号的完整 Cookie 等同于账号凭据。一旦泄露，攻击者可直接接管账号。若曾误提交，请立即在抖音退出登录以作废会话。
+
+## 项目结构
+
+```
+.
+├── app/
+│   ├── build.gradle.kts               # 模块配置、BuildConfig 注入、签名
+│   └── src/
+│       ├── main/
+│       │   ├── cpp/                   # 原生加固：反调试 / 反注入
+│       │   ├── java/com/jn/dyparse/
+│       │   │   ├── MainActivity.kt            # 入口 Activity
+│       │   │   ├── ParserViewModel.kt         # 核心状态机
+│       │   │   ├── ServerApiClient.kt         # 服务端单条解析
+│       │   │   ├── ServerAuthorClient.kt      # 服务端作者列表
+│       │   │   ├── AuthorBatchManager.kt      # 批量解析调度
+│       │   │   ├── DouyinABogusSigner.kt      # X-Bogus 签名
+│       │   │   ├── DouyinAuthStore.kt         # Cookie 登录态管理
+│       │   │   ├── SecurityGuard.kt           # 加固检测
+│       │   │   ├── data/                      # Room 实体、仓库、解析结果模型
+│       │   │   └── ui/                        # Compose 页面与组件
+│       │   └── res/
+│       └── test/                      # 单元测试
+├── server/                            # PHP 解析 API（含部署文档）
+├── gradle/libs.versions.toml          # 版本目录
+├── local.properties.example           # 本地配置模板
+├── DISCLAIMER.md                      # 免责声明（务必阅读）
+└── LICENSE                            # GPL-3.0
+```
+
+## 测试
+
+```bash
+./gradlew test          # JVM 单元测试
+./gradlew connectedAndroidTest   # 需要连接设备 / 模拟器
+```
+
+现有单元测试覆盖：解析结果字段映射、图集媒体解析、下载地址解析、作者批量匹配、风控校验识别。
+
+## 安全与合规
+
+- 仓库中**不包含**任何真实凭据：Cookie、token、HMAC 密钥、签名库与密码均已通过 `.gitignore` + 构建期注入隔离。
+- 如果你 fork 本项目并部署服务端，请遵守当地法律法规与平台条款，自行承担全部责任。
+- 发现安全问题请通过 Issue 或私下联系维护者，不要公开可利用细节。
+
+## 第三方组件
+
+| 组件 | 许可证 |
+| --- | --- |
+| AndroidX / Jetpack Compose / Room / Media3 | Apache-2.0 |
+| OkHttp、Gson | Apache-2.0 |
+| Coil | Apache-2.0 |
+| [Backdrop](https://github.com/Kyant0/Backdrop)、[Shapes](https://github.com/Kyant0/Shapes) | Apache-2.0 |
+
+以上均与 GPL-3.0 兼容。若你在自己的分支中引入了其他库，请自行补充署名与许可证信息。
+
+## 许可证
+
+本项目基于 **GNU General Public License v3.0** 发布，详见 [LICENSE](LICENSE)。
+
+你可以自由使用、修改、分发本项目，但**任何衍生作品必须以同样的 GPL-3.0 许可证开源**并提供完整源码。

@@ -1,0 +1,39 @@
+# ===== 本地环境 / IDE =====
+*.iml
+.gradle/
+.kotlin/
+/build/
+/app/build/
+/app/release/
+/app/.cxx/
+.cxx/
+.externalNativeBuild
+/captures
+.DS_Store
+.idea/
+
+# ===== 敏感凭据：绝对不能提交 =====
+# Android SDK 路径 + 签名库密码
+local.properties
+# 服务器真实配置（含 API_TOKEN / HMAC 密钥 / 抖音 Cookie）
+server/config.php
+# 抖音 Cookie 导出文件
+cookie.txt
+/remote-control/
+
+# 密钥与证书
+*.jks
+*.keystore
+*.pem
+*.key
+*.p12
+*.dm
+
+# ===== 构建产物 =====
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# ===== 历史泄露备份（仅本地保留，勿提交）=====
+.git-leaked-backup/

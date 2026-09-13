@@ -1,0 +1,20 @@
+## 复制本文件为 local.properties 后填写自己的值。
+## local.properties 已被 .gitignore 忽略，不会提交到仓库。
+
+# Android SDK 路径（Android Studio 会自动写入，通常无需手改）
+sdk.dir=C\:\\Users\\<你的用户名>\\AppData\\Local\\Android\\Sdk
+
+# ---------- Release 签名（可选，仅打正式包时需要）----------
+# 密钥库请放在项目目录之外，避免被 Gradle 清理或误提交
+RELEASE_STORE_FILE=D:/path/to/your-release.jks
+RELEASE_STORE_PASSWORD=your_store_password
+RELEASE_KEY_ALIAS=your_key_alias
+RELEASE_KEY_PASSWORD=your_key_password
+
+# ---------- 服务器解析 API（可选）----------
+# 不填则使用占位地址，App 会退回本地解析能力。
+# 这三个值必须与 server/config.php 里的 API_TOKEN / API_HMAC_KEY 完全一致。
+SERVER_API_BASE=https://your-server.example.com/api/data.php
+SERVER_AUTHOR_API_BASE=https://your-server.example.com/api/author_list.php
+SERVER_API_TOKEN=change_me_to_a_long_random_string
+SERVER_HMAC_KEY=change_me_to_another_long_random_string

@@ -1,0 +1,21 @@
+# 统一换行符，避免跨平台协作产生无意义的 diff
+* text=auto eol=lf
+
+# Windows 脚本必须保持 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制文件不做换行符转换
+*.jar binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ttf binary
+*.otf binary
+*.keystore binary
+*.jks binary
+
+# 语言统计
+*.kt linguist-language=Kotlin
+*.php linguist-language=PHP

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+   Android 12（API 31）及以上的备份 / 换机迁移规则。
+
+   安全说明：dyparse_auth 与 dyparse_anon_session 里保存的是抖音登录 Cookie，
+   属于账号凭据，必须排除在云备份与设备迁移之外。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="dyparse_auth.xml" />
+        <exclude domain="sharedpref" path="dyparse_anon_session.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="dyparse_auth.xml" />
+        <exclude domain="sharedpref" path="dyparse_anon_session.xml" />
+    </device-transfer>
+</data-extraction-rules>
